@@ -1,10 +1,11 @@
 <?php
 /**
- * 	TLE/Parser
- * 	@version 1.0
- *	@author Ivan Stanojevic ivanstan@gmail.com
+ *    TLE/Parser
  *
- * 	@link https://github.com/ivanstan/tle Available on GitHub.
+ * @version 1.0
+ * @author  Ivan Stanojevic ivanstan@gmail.com
+ *
+ * @link    https://github.com/ivanstan/tle Available on GitHub.
  */
 namespace TLE;
 
@@ -16,6 +17,7 @@ namespace TLE;
  */
 class Parser
 {
+	private $dateTimeZone;
 
 	/**
 	 * Universal Gravitational Constant
@@ -39,6 +41,48 @@ class Parser
 	const SATELLITE_UNCLASSIFIED = 'U';
 	const SATELLITE_CLASSIFIED = 'C';
 	const SATELLITE_SECRET = 'S';
+
+	/**
+	 * First Line String.
+	 *
+	 * @var string
+	 */
+	public $firstLine;
+
+	/**
+	 * Second Line String.
+	 *
+	 * @var string
+	 */
+	public $secondLine;
+
+	/**
+	 * Parsed checksum of the first line.
+	 *
+	 * @var int
+	 */
+	public $firstLineChecksum;
+
+	/**
+	 * Calculated checksum value of the first line.
+	 *
+	 * @var int
+	 */
+	public $firstLineCalculatedChecksum;
+
+	/**
+	 * Parsed checksum of the second line.
+	 *
+	 * @var int
+	 */
+	public $secondLineChecksum;
+
+	/**
+	 * Calculated checksum value of the second line.
+	 *
+	 * @var int
+	 */
+	public $secondLineCalculatedChecksum;
 
 	/**
 	 * Twenty-four character name (to be consistent with the name length in the NORAD Satellite Catalog).
@@ -191,7 +235,7 @@ class Parser
 	/**
 	 * Calculated Semi-Major Axis based on Mean Motion.
 	 *
-	 * @var	float
+	 * @var    float
 	 */
 	public $semiMajorAxis;
 
@@ -205,7 +249,7 @@ class Parser
 	/**
 	 * Class Constructor.
 	 *
-	 * @param $tleString	Two line element set
+	 * @param $tleString    string    TLE Data.
 	 *
 	 * @throws \Exception
 	 */
@@ -226,51 +270,43 @@ class Parser
 				throw new \Exception('Invalid two element set');
 		}
 
-		$line1 = reset($lines);
-		$line2 = end($lines);
+		$this->firstLine  = trim(reset($lines));
+		$this->secondLine = trim(end($lines));
 
-		$checksum      = $this->calculateChecksum($line1);
-		$checkSumLine1 = trim(substr($line1, 68));
+		$this->firstLineChecksum           = (int)trim(substr($this->firstLine, 68));
+		$this->firstLineCalculatedChecksum = (int)$this->calculateChecksum($this->firstLine);
 
-		echo "<pre>";
-		print_r($checksum);
-		echo "</pre>";
+		if($this->firstLineChecksum != $this->firstLineCalculatedChecksum) {
+			throw new \Exception('TLE First Line Checksum fail');
+		}
 
-		echo "<pre>";
-		print_r($checkSumLine1);
-		echo "</pre>";
+		$this->secondLineChecksum           = (int)trim(substr($this->secondLine, 68));
+		$this->secondLineCalculatedChecksum = (int)$this->calculateChecksum($this->secondLine);
 
-		$checksum      = $this->calculateChecksum($line2);
-		$checkSumLine2 = trim(substr($line2, 68));
+		if($this->secondLineChecksum != $this->secondLineCalculatedChecksum) {
+			throw new \Exception('TLE Second Line Checksum fail');
+		}
 
-		echo "<pre>";
-		print_r($checksum);
-		echo "</pre>";
-
-		echo "<pre>";
-		print_r($checkSumLine2);
-		echo "</pre>";
-
-		$this->satelliteNumber                   = substr($line1, 2, 6);
-		$this->classification                    = substr($line1, 7, 1);
-		$this->internationalDesignatorLaunchYear = trim(substr($line1, 9, 2));
+		$this->satelliteNumber                   = (int)substr($this->firstLine, 2, 6);
+		$this->classification                    = substr($this->firstLine, 7, 1);
+		$this->internationalDesignatorLaunchYear = (int)trim(substr($this->firstLine, 9, 2));
 
 		if($this->internationalDesignatorLaunchYear) {
 			$dateTime = \DateTime::createFromFormat('y', $this->internationalDesignatorLaunchYear);
 			$dateTime->setTimezone($this->dateTimeZone);
-			$this->internationalDesignatorLaunchYear = $dateTime->format('Y');
+			$this->internationalDesignatorLaunchYear = (int)$dateTime->format('Y');
 		}
 
-		$this->internationalDesignatorLaunchNumber = trim(substr($line1, 12, 2));
-		$this->internationalDesignatorLaunchPiece  = trim(substr($line1, 14, 2));
+		$this->internationalDesignatorLaunchNumber = (int)trim(substr($this->firstLine, 12, 2));
+		$this->internationalDesignatorLaunchPiece  = trim(substr($this->firstLine, 14, 2));
 
-		$this->epochYear = trim(substr($line1, 18, 2));
+		$this->epochYear = trim(substr($this->firstLine, 18, 2));
 		$dateTime        = \DateTime::createFromFormat('y', $this->epochYear);
 		$dateTime->setTimezone($this->dateTimeZone);
-		$this->epochYear     = $dateTime->format('Y');
-		$this->epoch         = trim(substr($line1, 18, 14));
-		$epoch               = explode('.', trim(substr($line1, 20, 12)));
-		$this->epochDay      = $epoch[0];
+		$this->epochYear     = (int)$dateTime->format('Y');
+		$this->epoch         = trim(substr($this->firstLine, 18, 14));
+		$epoch               = explode('.', trim(substr($this->firstLine, 20, 12)));
+		$this->epochDay      = (int)$epoch[0];
 		$this->epochFraction = '0.' . $epoch[1];
 		$seconds             = round(86400 * $this->epochFraction);
 		$date                = new \DateTime();
@@ -279,19 +315,19 @@ class Parser
 		$date->setTime(0, 0, 0);
 		$this->epochUnixTimestamp = $date->format('U') + (86400 * $this->epochDay) + $seconds - 86400;
 
-		$this->meanMotionFirstDerivative   = '0' . trim(substr($line1, 33, 10));
-		$this->meanMotionSecondDerivative  = trim(substr($line1, 44, 8));
-		$this->bStarDragTerm               = trim(substr($line1, 53, 8));
-		$this->elementNumber               = trim(substr($line1, 64, 4));
-		$this->satelliteNumber             = trim(substr($line2, 2, 6));
-		$this->inclination                 = trim(substr($line2, 8, 8));
-		$this->rightAscensionAscendingNode = trim(substr($line2, 17, 8));
-		$this->eccentricity                = '0.' . trim(substr($line2, 26, 7));
-		$this->argumentPerigee             = trim(substr($line2, 34, 8));
-		$this->meanAnomaly                 = trim(substr($line2, 43, 8));
-		$this->meanMotion                  = trim(substr($line2, 52, 11));
-		$this->semiMajorAxis = pow((self::GRAVITY_C * self::EARTH_MASS) / (2 * pi() * $this->meanMotion)^2, 1/3);
-		$this->revolutionNumber = trim(substr($line2, 63, 5));
+		$this->meanMotionFirstDerivative   = trim(substr($this->firstLine, 33, 10));
+		$this->meanMotionSecondDerivative  = trim(substr($this->firstLine, 44, 8));
+		$this->bStarDragTerm               = trim(substr($this->firstLine, 53, 8));
+		$this->elementNumber               = (int)trim(substr($this->firstLine, 64, 4));
+		$this->satelliteNumber             = (int)trim(substr($this->secondLine, 2, 6));
+		$this->inclination                 = (float)trim(substr($this->secondLine, 8, 8));
+		$this->rightAscensionAscendingNode = (float)trim(substr($this->secondLine, 17, 8));
+		$this->eccentricity                = (float)('.' . trim(substr($this->secondLine, 26, 7)));
+		$this->argumentPerigee             = (float)trim(substr($this->secondLine, 34, 8));
+		$this->meanAnomaly                 = (float)trim(substr($this->secondLine, 43, 8));
+		$this->meanMotion                  = (float)trim(substr($this->secondLine, 52, 11));
+		$this->semiMajorAxis               = pow((self::GRAVITY_C * self::EARTH_MASS) / (2 * pi() * $this->meanMotion) ^ 2, 1 / 3);
+		$this->revolutionNumber            = (int)trim(substr($this->secondLine, 63, 5));
 	}
 
 	/**
@@ -322,23 +358,15 @@ class Parser
 	}
 
 	/**
-	 * @param $line
-	The Line 1 Checksum is determined by adding all the previous numbers in Line 1 and taking the last digit in the final sum. All letters, periods and plus signs are taken as "0". Negative signs are taken as "1".
+	 * Calculates checksum (Modulo 10) for TLE line.
 	 *
-	 * This is mainly used to verify the first line's authenticity and/or its integrity upon receipt.
+	 * @param $line TLE line
 	 *
-	 * For the ISS TLE - Line 1:
-	 *
-	 * 1+2+5+5+4+4+U(0)+9+8+0+6+7+A(0)+0+6+0+5+2+.(0)+3+4+7+6+7+3+6+1+.(0)+0+0+0+1+3+9+4+9+0+0+0+0+0+-(1)+0+9+7+1+2+7+-(1)+4+0+3+9+3
-	 * = 174
-	 *
-	 * Taking the last digit gives a Line 1 Checksum of 4, which matches the final digit in Line 1.
-	 *
-	 * Many orbit propagators do not read or use this value.
+	 * @return int
 	 */
-
 	public function calculateChecksum($line) {
-		$sum = 0;
+		$line = substr($line, 0, strlen($line) - 1);
+		$sum  = 0;
 		for($i = 0; $i < strlen($line); $i++) {
 			if($line[$i] == '-') {
 				$sum += 1;
