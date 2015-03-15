@@ -9,6 +9,9 @@
  */
 namespace TLE;
 
+use \TLE\Constant;
+use \TLE\LatLng;
+
 /**
  * Class Parser.
  * Parses the Two Element Set obtained from NASA/NORAD
@@ -18,16 +21,6 @@ namespace TLE;
 class Parser
 {
 	private $dateTimeZone;
-
-	/**
-	 * Universal Gravitational Constant
-	 */
-	const GRAVITY_C = 0;
-
-	/**
-	 * Mass of Earth
-	 */
-	const EARTH_MASS = 0;
 
 	/**
 	 * Orbit direction.
@@ -163,6 +156,13 @@ class Parser
 	public $epochUnixTimestamp;
 
 	/**
+	 * Elapsed time in seconds from TLE Epoch.
+	 *
+	 * @var mixed
+	 */
+	public $deltaSec;
+
+	/**
 	 * Half of the Mean Motion First Time Derivative, measured in orbits per day per day (orbits/day^2).
 	 *
 	 * @var float
@@ -233,6 +233,20 @@ class Parser
 	public $meanMotion;
 
 	/**
+	 * Mean Motion expressed in radians per second.
+	 *
+	 * @var float
+	 */
+	public $meanMotionRadSec;
+
+	/**
+	 * Time of one revolution expressed in seconds.
+	 *
+	 * @var float
+	 */
+	public $revTime;
+
+	/**
 	 * Calculated Semi-Major Axis based on Mean Motion.
 	 *
 	 * @var    float
@@ -240,11 +254,22 @@ class Parser
 	public $semiMajorAxis;
 
 	/**
+	 * Calculated Semi-Minor Axis.
+	 *
+	 * @var    float
+	 */
+	public $semiMinorAxis;
+
+	/**
 	 * Orbit number the satellite has finished from deployment to orbit until the specified TLE epoch.
 	 *
 	 * @var float
 	 */
 	public $revolutionNumber;
+
+	private $eccentricAnomaly;
+	private $cosEccentricAnomaly;
+	private $sinEccentricAnomaly;
 
 	/**
 	 * Class Constructor.
@@ -254,7 +279,8 @@ class Parser
 	 * @throws \Exception
 	 */
 	public function __construct($tleString) {
-		$this->dateTimeZone = new \DateTimeZone('UTC');
+		$this->dateTimeZone    = new \DateTimeZone('UTC');
+		$this->currentDateTime = getdate();
 
 		$lines = explode("\n", $tleString);
 
@@ -299,22 +325,16 @@ class Parser
 
 		$this->internationalDesignatorLaunchNumber = (int)trim(substr($this->firstLine, 12, 2));
 		$this->internationalDesignatorLaunchPiece  = trim(substr($this->firstLine, 14, 2));
-
-		$this->epochYear = trim(substr($this->firstLine, 18, 2));
-		$dateTime        = \DateTime::createFromFormat('y', $this->epochYear);
+		$this->epochYear                           = trim(substr($this->firstLine, 18, 2));
+		$dateTime                                  = \DateTime::createFromFormat('y', $this->epochYear);
 		$dateTime->setTimezone($this->dateTimeZone);
-		$this->epochYear     = (int)$dateTime->format('Y');
-		$this->epoch         = trim(substr($this->firstLine, 18, 14));
-		$epoch               = explode('.', trim(substr($this->firstLine, 20, 12)));
-		$this->epochDay      = (int)$epoch[0];
-		$this->epochFraction = '0.' . $epoch[1];
-		$seconds             = round(86400 * $this->epochFraction);
-		$date                = new \DateTime();
-		$date->setTimezone($this->dateTimeZone);
-		$date->setDate($this->epochYear, 1, 1);
-		$date->setTime(0, 0, 0);
-		$this->epochUnixTimestamp = $date->format('U') + (86400 * $this->epochDay) + $seconds - 86400;
-
+		$this->epochYear                   = (int)$dateTime->format('Y');
+		$this->epoch                       = trim(substr($this->firstLine, 18, 14));
+		$epoch                             = explode('.', trim(substr($this->firstLine, 20, 12)));
+		$this->epochDay                    = (int)$epoch[0];
+		$this->epochFraction               = '0.' . $epoch[1];
+		$this->epochUnixTimestamp          = $this->getEpochUnixTimestamp();
+		$this->deltaSec                    = $this->getDeltaSec();
 		$this->meanMotionFirstDerivative   = trim(substr($this->firstLine, 33, 10));
 		$this->meanMotionSecondDerivative  = trim(substr($this->firstLine, 44, 8));
 		$this->bStarDragTerm               = trim(substr($this->firstLine, 53, 8));
@@ -326,8 +346,14 @@ class Parser
 		$this->argumentPerigee             = (float)trim(substr($this->secondLine, 34, 8));
 		$this->meanAnomaly                 = (float)trim(substr($this->secondLine, 43, 8));
 		$this->meanMotion                  = (float)trim(substr($this->secondLine, 52, 11));
-		$this->semiMajorAxis               = pow((self::GRAVITY_C * self::EARTH_MASS) / (2 * pi() * $this->meanMotion) ^ 2, 1 / 3);
+		$this->meanMotionRadSec            = ($this->meanMotion * 2 * M_PI) / 86400;
+		$this->revTime                     = $this->meanMotion * \Constant::SIDERAL_DAY_SEC;
+		$this->semiMajorAxis               = pow((\Constant::eg_4pi * pow($this->revTime, 2)), (1 / 3));
+		$this->semiMinorAxis               = $this->semiMajorAxis * sqrt(1 - pow($this->eccentricity, 2));
 		$this->revolutionNumber            = (int)trim(substr($this->secondLine, 63, 5));
+		$this->satelliteRange              = $this->getSatelliteRange();
+		$satellitePoint                    = $this->getSatellitePoint();
+		$this->satelliteLatLng             = new \LatLng($satellitePoint['latitude'], $satellitePoint['longitude']);
 	}
 
 	/**
@@ -377,5 +403,92 @@ class Parser
 		}
 
 		return $sum % 10;
+	}
+
+	private function getSatelliteRange() {
+		$radsSinceEpoch     = ($this->meanMotionRadSec * $this->deltaSec) + deg2rad($this->meanAnomaly); // (Mean Motion * Elapsed time) + Mean Anomaly
+		$fractionRevolution = $radsSinceEpoch - (2 * M_PI * (floor($radsSinceEpoch / (2 * M_PI))));
+
+		$this->eccentricAnomaly = $fractionRevolution;
+		do {
+			$this->cosEccentricAnomaly = cos($this->eccentricAnomaly);
+			$this->sinEccentricAnomaly = sin($this->eccentricAnomaly);
+			$denom                     = 1 - ($this->cosEccentricAnomaly * $this->eccentricity);
+			$iter                      = ($this->eccentricAnomaly - ($this->eccentricity * $this->sinEccentricAnomaly) - $radsSinceEpoch) / $denom;
+			$this->eccentricAnomaly    = $this->eccentricAnomaly - $iter;
+		} while(abs($iter) > 0.0001);
+
+		return $this->semiMajorAxis * $denom;
+	}
+
+	/**
+	 * Calculate Unix timestamp from TLE Epoch.
+	 *
+	 * @return string
+	 */
+	private function getEpochUnixTimestamp() {
+		$seconds = round(86400 * $this->epochFraction);
+		$date    = new \DateTime();
+		$date->setTimezone($this->dateTimeZone);
+		$date->setDate($this->epochYear, 1, 1);
+		$date->setTime(0, 0, 0);
+
+		return $date->format('U') + (86400 * $this->epochDay) + $seconds - 86400;
+	}
+
+	/**
+	 * Calculate Delta Sec.
+	 *
+	 * @return mixed
+	 */
+	private function getDeltaSec() {
+		return $this->currentDateTime[0] - $this->epochUnixTimestamp;
+	}
+
+	private function getSatellitePoint() {
+		// Calculating Satellite position vector on the Orbital Plane
+		$satOrbitalPlaneX = $this->semiMajorAxis * ($this->cosEccentricAnomaly - $this->eccentricity);
+		$satOrbitalPlaneY = $this->semiMinorAxis * $this->sinEccentricAnomaly;
+
+		// Partial Rotation Matrix to transform from the Orbital Plane to Inertial (Celestial) Coordinates
+		$cosArgumentPerigee = cos(deg2rad($this->argumentPerigee));
+		$sinArgumentPerigee = sin(deg2rad($this->argumentPerigee));
+		$cosRaan     = cos(deg2rad($this->rightAscensionAscendingNode));
+		$sinRaan     = sin(deg2rad($this->rightAscensionAscendingNode));
+		$cosInclination    = cos(deg2rad($this->inclination));
+		$sinInclination    = sin(deg2rad($this->inclination));
+
+		$cel_x_x = ($cosArgumentPerigee * $cosRaan) - ($sinArgumentPerigee * $sinRaan * $cosInclination);
+		$cel_x_y = (-$sinArgumentPerigee * $cosRaan) - ($cosArgumentPerigee * $sinRaan * $cosInclination);
+		$cel_y_x = ($cosArgumentPerigee * $sinRaan) + ($sinArgumentPerigee * $cosRaan * $cosInclination);
+		$cel_y_y = (-$sinArgumentPerigee * $sinRaan) + ($cosArgumentPerigee * $cosRaan * $cosInclination);
+		$cel_z_x = ($sinArgumentPerigee * $sinInclination);
+		$cel_z_y = ($cosArgumentPerigee * $sinInclination);
+
+		// Calculations Satellite position vector in Celestial Coordinates
+		$satCelestialX = ($satOrbitalPlaneX * $cel_x_x) + ($satOrbitalPlaneY * $cel_x_y);
+		$satCelestialY = ($satOrbitalPlaneX * $cel_y_x) + ($satOrbitalPlaneY * $cel_y_y);
+		$satCelestialZ = ($satOrbitalPlaneX * $cel_z_x) + ($satOrbitalPlaneY * $cel_z_y);
+
+		$extraEarthRotationPerDay = (2 * M_PI) / \Constant::Tropical_year;
+		// The total earth rotation in one Solar Day = 1 sideral day + the above figure
+		$earthRotRadSec = ($extraEarthRotationPerDay + (2 * M_PI)) / 86400;
+
+		$deltaGhaaSec   = $this->epochUnixTimestamp[0] - (strtotime(\Constant::date_of_GHAA));
+		$currentGhaaRad = deg2rad(\Constant::ghaa_deg) + ($deltaGhaaSec * $earthRotRadSec);
+		$cosGhaa        = cos(-$currentGhaaRad);
+		$sinGhaa        = sin(-$currentGhaaRad);
+
+		// Satellite Coordinates in Geocentric Equatorial Coordinates (from RA to LONG, etc.)
+		$satGeoCX = ($satCelestialX * $cosGhaa) - ($satCelestialX * $sinGhaa);
+		$satGeoCY = ($satCelestialX * $sinGhaa) + ($satCelestialX * $cosGhaa);
+		$satGeoCZ = $satCelestialZ;
+
+		$satelliteLongitude = rad2deg(atan2($satGeoCY, $satGeoCX));
+		$satelliteLatitude  = rad2deg(asin($satGeoCZ / $this->satelliteRange));
+
+		return array(
+			'latitude' => $satelliteLongitude, 'longitude' => $satelliteLatitude,
+		);
 	}
 }
