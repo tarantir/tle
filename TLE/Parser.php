@@ -275,12 +275,13 @@ class Parser
 	 * Class Constructor.
 	 *
 	 * @param $tleString    string    TLE Data.
+	 * @param $dateTime		array	  DateTime array as result from getdate() function.
 	 *
 	 * @throws \Exception
 	 */
-	public function __construct($tleString) {
+	public function __construct($tleString, $dateTime = null) {
 		$this->dateTimeZone    = new \DateTimeZone('UTC');
-		$this->currentDateTime = getdate();
+		$this->currentDateTime = ($dateTime == null) ? getdate() : $dateTime;
 
 		$lines = explode("\n", $tleString);
 

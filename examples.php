@@ -45,6 +45,7 @@ $tleData[] = 'ISS [Orbit 1362]
 2 25544  51.6451 186.7036 0008612 107.8141 252.3953 15.55144393 13625';
 
 foreach($tleData as $tle) {
+
     echo "<pre>"; print_r($tle); echo "</pre>";
 
     $parser = new Parser($tle);
