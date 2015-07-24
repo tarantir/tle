@@ -5,7 +5,7 @@ A two-line element (TLE) is a set of two data lines listing orbital elements tha
 
 Parser usage:
 ```
-use TLE\Parser;
+require_once('TLE/Parser.php');
 
 $tleParser = new Parser($tleString);
 
