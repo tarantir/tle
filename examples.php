@@ -6,9 +6,7 @@
  * Time: 8:49 PM
  */
 
-spl_autoload_register();
-
-use TLE\Parser;
+require_once('TLE/Parser.php');
 
 $tleData[] = 'NOAA 14
 1 23455U 94089A   97320.90946019  .00000140  00000-0  10191-3 0  2621
