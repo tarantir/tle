@@ -7,9 +7,8 @@
  *
  * @link    https://github.com/ivanstan/tle Available on GitHub.
  */
-namespace TLE;
 
-use \TLE\Constant;
+require_once('TLE/Constant.php');
 
 /**
  * Class Parser.
